@@ -1,0 +1,72 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Adao\Wiz\Discovery;
+use Adao\Wiz\WizBulb;
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+
+$usage = <<<TXT
+Usage:
+  wiz discover
+  wiz <ip> status | config
+  wiz <ip> on [brightness 10-100] [temp K]
+  wiz <ip> off | toggle
+  wiz <ip> dim <10-100>
+  wiz <ip> temp <kelvin>
+  wiz <ip> scene <id> [brightness]
+
+You can also set WIZ_IP and omit <ip>.
+
+TXT;
+
+$args = array_slice($argv, 1);
+
+try {
+    if (($args[0] ?? '') === 'discover') {
+        $bulbs = Discovery::find();
+        echo $bulbs ? json_encode($bulbs, JSON_PRETTY_PRINT) . PHP_EOL : "No bulbs found.\n";
+        exit(0);
+    }
+
+    $ip = null;
+    if (isset($args[0]) && filter_var($args[0], FILTER_VALIDATE_IP)) {
+        $ip = array_shift($args);
+    } elseif (getenv('WIZ_IP')) {
+        $ip = getenv('WIZ_IP');
+    }
+
+    $action = $args[0] ?? null;
+    if ($ip === null || $action === null) {
+        fwrite(STDERR, $usage);
+        exit(1);
+    }
+
+    $a = isset($args[1]) ? (int) $args[1] : null;
+    $b = isset($args[2]) ? (int) $args[2] : null;
+    $bulb = new WizBulb($ip);
+
+    $result = match ($action) {
+        'status' => $bulb->status(),
+        'config' => $bulb->systemConfig(),
+        'on'     => $bulb->on($a, $b),
+        'off'    => $bulb->off(),
+        'toggle' => $bulb->toggle(),
+        'dim'    => $a !== null ? $bulb->setBrightness($a) : throw new InvalidArgumentException('Missing brightness'),
+        'temp'   => $a !== null ? $bulb->setTemperature($a) : throw new InvalidArgumentException('Missing temperature'),
+        'scene'  => $a !== null ? $bulb->setScene($a, $b) : throw new InvalidArgumentException('Missing scene ID'),
+        default  => throw new InvalidArgumentException("Unknown action: {$action}"),
+    };
+
+    echo json_encode($result, JSON_PRETTY_PRINT) . PHP_EOL;
+} catch (Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}
